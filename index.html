@@ -61,36 +61,20 @@
       font-size: 0.95rem;
     }
 
-    .actions-bar {
-      display: flex;
-      gap: 10px;
-    }
-
     button {
       background-color: var(--primary-color);
       color: white;
       border: none;
       padding: 12px;
-      font-size: 0.95rem;
+      font-size: 1rem;
       font-weight: bold;
       border-radius: var(--border-radius);
       cursor: pointer;
       transition: background-color 0.2s ease;
-      flex: 1;
     }
 
     button:hover {
       background-color: #006699;
-    }
-
-    .btn-back {
-      background-color: #6c757d;
-      flex: 0 0 110px;
-      display: none; /* Exibido dinamicamente */
-    }
-
-    .btn-back:hover {
-      background-color: #5a6268;
     }
 
     .info-box {
@@ -230,20 +214,10 @@
       font-weight: bold;
       cursor: pointer;
       white-space: nowrap;
-      transition: background-color 0.2s ease;
     }
 
     .btn-folder:hover {
       background-color: #006699;
-    }
-
-    .btn-folder.visited {
-      background-color: #6f42c1 !important;
-      color: #ffffff !important;
-    }
-
-    .btn-folder.visited:hover {
-      background-color: #5a32a3 !important;
     }
 
     /* Seção de Arquivos Baixados */
@@ -311,11 +285,9 @@
         type="text" 
         id="folderInput" 
         placeholder="Cole o link completo ou o ID da pasta pública aqui"
+        value="https://drive.google.com/drive/folders/14rnhFYF-vZA7I8PtDbqPw2xEc2naGL2W"
       />
-      <div class="actions-bar">
-        <button id="btnVoltar" class="btn-back" onclick="voltarPasta()">⬅️ Voltar</button>
-        <button onclick="buscarArquivos(false, true)">Listar Arquivos</button>
-      </div>
+      <button onclick="buscarArquivos()">Listar Arquivos</button>
     </div>
 
     <!-- Exibe o ID Limpo/Corrigido -->
@@ -349,22 +321,14 @@
     const API_KEY = "AIzaSyCnzf-Ji_bwbStZwAIAy9fxI6WiyfyFo9M";
 
     let pastaAtualId = "";
-    let historicoPastas = []; // Pilha para o botão Voltar
     
     // Recupera dados salvos no localStorage (Persistência)
     let baixadosSet = new Set(JSON.parse(localStorage.getItem("drive_baixados_ids") || "[]"));
     let arquivosBaixados = JSON.parse(localStorage.getItem("drive_baixados_nomes") || "[]");
-    let pastasAbertasSet = new Set(JSON.parse(localStorage.getItem("drive_pastas_abertas") || "[]"));
 
     // Inicialização ao carregar a página
     window.addEventListener("DOMContentLoaded", () => {
       atualizarListaBaixadosUI();
-
-      const ultimoLink = localStorage.getItem("drive_ultimo_link");
-      if (ultimoLink) {
-        document.getElementById("folderInput").value = ultimoLink;
-        buscarArquivos(false, true);
-      }
     });
 
     // Função para extrair e tratar o ID do Link
@@ -384,7 +348,6 @@
     function salvarEstado() {
       localStorage.setItem("drive_baixados_ids", JSON.stringify(Array.from(baixadosSet)));
       localStorage.setItem("drive_baixados_nomes", JSON.stringify(arquivosBaixados));
-      localStorage.setItem("drive_pastas_abertas", JSON.stringify(Array.from(pastasAbertasSet)));
     }
 
     // Atualizar UI do Histórico de Baixados
@@ -407,28 +370,7 @@
       });
     }
 
-    // Atualiza visibilidade do botão Voltar
-    function atualizarBotaoVoltarUI() {
-      const btnVoltar = document.getElementById("btnVoltar");
-      if (historicoPastas.length > 0) {
-        btnVoltar.style.display = "block";
-      } else {
-        btnVoltar.style.display = "none";
-      }
-    }
-
-    // Voltar para a pasta anterior
-    function voltarPasta() {
-      if (historicoPastas.length === 0) return;
-
-      const pastaAnteriorId = historicoPastas.pop();
-      atualizarBotaoVoltarUI();
-
-      document.getElementById("folderInput").value = pastaAnteriorId;
-      buscarArquivos(false, false); // Não adiciona novamente ao histórico
-    }
-
-    // Animação da Barra de Progresso
+    // Animação da Barra de Progresso Principal
     function animarProgresso(callback) {
       const progressText = document.getElementById("progressBarText");
       const loadingContainer = document.getElementById("loadingContainer");
@@ -453,11 +395,11 @@
       }, 40);
     }
 
-    // Download NATIVO via BLOB (Evita o bloqueador de Pop-up do navegador)
+    // Download usando a API de Mídia em segundo plano (Opção 2 - Sem redirecionar nem pedir e-mail)
     async function iniciarDownload(btnElement, fileId, nomeArquivo) {
       if (baixadosSet.has(fileId)) return;
 
-      // Desabilita o botão temporariamente
+      // Desabilita o botão e exibe o mini spinner
       btnElement.innerHTML = `<span class="mini-spinner"></span> Baixando...`;
       btnElement.classList.add("disabled");
 
@@ -466,29 +408,22 @@
         const response = await fetch(mediaUrl);
 
         if (!response.ok) {
-          throw new Error("Erro de resposta ao obter arquivo.");
+          throw new Error("Não foi possível baixar via API direta.");
         }
 
-        // Converte em Blob (objeto de arquivo local em memória)
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
 
-        // Dispara o download diretamente sem abrir popup
-        const downloadAnchor = document.createElement("a");
-        downloadAnchor.style.display = "none";
-        downloadAnchor.href = blobUrl;
-        downloadAnchor.download = nomeArquivo;
-        document.body.appendChild(downloadAnchor);
-        
-        downloadAnchor.click();
+        // Dispara o download nativo do arquivo no navegador
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = nomeArquivo;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
 
-        // Limpeza de memória
-        setTimeout(() => {
-          document.body.removeChild(downloadAnchor);
-          window.URL.revokeObjectURL(blobUrl);
-        }, 1000);
-
-        // Marca como baixado
+        // Registra e salva o arquivo como baixado
         baixadosSet.add(fileId);
         arquivosBaixados.push(nomeArquivo);
         salvarEstado();
@@ -497,12 +432,11 @@
         atualizarListaBaixadosUI();
 
       } catch (error) {
-        console.warn("Download direto bloqueado pela API ou cota, abrindo em aba direta:", error);
+        console.warn("Download via API falhou ou ultrapassou cota, usando abertura no Drive:", error);
         
-        // Fallback: Redireciona a própria janela para download direto
-        const linkDireto = `https://drive.google.com/uc?export=download&id=${fileId}`;
-        window.location.href = linkDireto;
-
+        // Fallback: Abre a visualização direta no Drive caso o arquivo exija login/autenticação extra
+        window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
+        
         baixadosSet.add(fileId);
         arquivosBaixados.push(nomeArquivo);
         salvarEstado();
@@ -514,37 +448,28 @@
 
     // Resetar Aplicação e Limpar Dados do LocalStorage
     function resetarAplicacao() {
-      if (confirm("Deseja realmente limpar todo o histórico de pesquisas, downloads e pastas salvas?")) {
+      if (confirm("Deseja realmente limpar todo o histórico de downloads salvos?")) {
         baixadosSet.clear();
         arquivosBaixados = [];
-        pastasAbertasSet.clear();
-        historicoPastas = [];
-        
         localStorage.removeItem("drive_baixados_ids");
         localStorage.removeItem("drive_baixados_nomes");
-        localStorage.removeItem("drive_pastas_abertas");
-        localStorage.removeItem("drive_ultimo_link");
-        
         pastaAtualId = "";
-        document.getElementById("folderInput").value = "";
-        document.getElementById("processedLinkBox").style.display = "none";
-        document.getElementById("status").innerText = "";
-        document.getElementById("results").innerHTML = "";
         
-        atualizarBotaoVoltarUI();
         atualizarListaBaixadosUI();
+        
+        // Re-renderiza a lista caso já haja arquivos exibidos na tela
+        if (document.getElementById("results").children.length > 0) {
+          buscarArquivos(true);
+        }
       }
     }
 
     function abrirPasta(subfolderId) {
-      pastasAbertasSet.add(subfolderId);
-      salvarEstado();
-
       document.getElementById("folderInput").value = subfolderId;
-      buscarArquivos(true, false);
+      buscarArquivos();
     }
 
-    async function buscarArquivos(isNavegacaoParaFrente = false, isNovaPesquisaManual = false) {
+    async function buscarArquivos(forcarRecarregamento = false) {
       const inputVal = document.getElementById("folderInput").value;
       const statusDiv = document.getElementById("status");
       const resultsDiv = document.getElementById("results");
@@ -555,26 +480,21 @@
         return;
       }
 
-      const newFolderId = extrairECorrigirFolderId(inputVal);
-
-      // Gerencia o histórico do botão "Voltar"
-      if (isNavegacaoParaFrente && pastaAtualId && pastaAtualId !== newFolderId) {
-        historicoPastas.push(pastaAtualId);
-      } else if (isNovaPesquisaManual) {
-        historicoPastas = []; // Limpa o histórico em nova pesquisa do usuário
-      }
-      atualizarBotaoVoltarUI();
-
-      localStorage.setItem("drive_ultimo_link", inputVal.trim());
+      const folderId = extrairECorrigirFolderId(inputVal);
 
       processedBox.style.display = "block";
-      processedBox.innerHTML = `⚙️ <b>Link Processado com Sucesso!</b><br>ID da pasta atual: <code>${newFolderId}</code>`;
+      processedBox.innerHTML = `⚙️ <b>Link Processado com Sucesso!</b><br>ID extraído da pasta: <code>${folderId}</code>`;
+
+      if (folderId === pastaAtualId && !forcarRecarregamento) {
+        statusDiv.innerText = "⚠️ Esta pasta já está carregada e sendo exibida na tela.";
+        return;
+      }
 
       statusDiv.innerText = "Consultando Google Drive API...";
       resultsDiv.innerHTML = "";
 
       animarProgresso(async () => {
-        const url = `https://www.googleapis.com/drive/v3/files?q='${newFolderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&key=${API_KEY}`;
+        const url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&key=${API_KEY}`;
 
         try {
           const response = await fetch(url);
@@ -586,12 +506,12 @@
           }
 
           if (!data.files || data.files.length === 0) {
-            statusDiv.innerText = "Nenhum arquivo encontrado nesta pasta.";
+            statusDiv.innerText = "Nenhum arquivo encontrado ou a pasta não está pública.";
             return;
           }
 
-          pastaAtualId = newFolderId;
-          statusDiv.innerText = `Sucesso! ${data.files.length} item(ns) encontrado(s).`;
+          pastaAtualId = folderId;
+          statusDiv.innerText = `Sucesso! ${data.files.length} arquivo(s) encontrado(s).`;
 
           data.files.forEach(file => {
             const isPdf = file.mimeType === "application/pdf";
@@ -605,7 +525,6 @@
             else if (isPdf) icon = "📕";
 
             const jaBaixado = baixadosSet.has(file.id);
-            const jaAberta = pastasAbertasSet.has(file.id);
             const nomeArquivoFormatado = file.name.replace(/'/g, "\\'");
 
             card.innerHTML = `
@@ -620,11 +539,7 @@
                         onclick="iniciarDownload(this, '${file.id}', '${nomeArquivoFormatado}')">
                         ${jaBaixado ? 'Baixado ✅' : 'Baixar PDF'}
                      </button>`
-                  : `<button 
-                        class="btn-folder ${jaAberta ? 'visited' : ''}" 
-                        onclick="abrirPasta('${file.id}')">
-                        ${jaAberta ? 'Aberta 📂' : 'Abrir Pasta 📁'}
-                     </button>`
+                  : `<button class="btn-folder" onclick="abrirPasta('${file.id}')">Abrir Pasta 📁</button>`
               }
             `;
 
