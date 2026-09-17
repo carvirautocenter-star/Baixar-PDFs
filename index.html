@@ -395,30 +395,55 @@
       }, 40);
     }
 
-    // Iniciar Download com Spinner no Próprio Botão
-    function iniciarDownload(btnElement, fileId, nomeArquivo) {
+    // Download usando a API de Mídia em segundo plano (Opção 2 - Sem redirecionar nem pedir e-mail)
+    async function iniciarDownload(btnElement, fileId, nomeArquivo) {
       if (baixadosSet.has(fileId)) return;
 
-      // Coloca estado de carregamento com Mini Spinner
+      // Desabilita o botão e exibe o mini spinner
       btnElement.innerHTML = `<span class="mini-spinner"></span> Baixando...`;
       btnElement.classList.add("disabled");
 
-      // Simula o tempo de download do arquivo antes de finalizar o botão
-      setTimeout(() => {
+      try {
+        const mediaUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${API_KEY}`;
+        const response = await fetch(mediaUrl);
+
+        if (!response.ok) {
+          throw new Error("Não foi possível baixar via API direta.");
+        }
+
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        // Dispara o download nativo do arquivo no navegador
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = nomeArquivo;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
+
+        // Registra e salva o arquivo como baixado
         baixadosSet.add(fileId);
         arquivosBaixados.push(nomeArquivo);
         salvarEstado();
 
-        // Altera botão para "Baixado"
         btnElement.innerHTML = `Baixado ✅`;
-
-        // Atualiza Histórico
         atualizarListaBaixadosUI();
 
-        // Dispara o download real em nova aba
-        const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-        window.open(downloadUrl, '_blank');
-      }, 1200);
+      } catch (error) {
+        console.warn("Download via API falhou ou ultrapassou cota, usando abertura no Drive:", error);
+        
+        // Fallback: Abre a visualização direta no Drive caso o arquivo exija login/autenticação extra
+        window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
+        
+        baixadosSet.add(fileId);
+        arquivosBaixados.push(nomeArquivo);
+        salvarEstado();
+
+        btnElement.innerHTML = `Baixado ✅`;
+        atualizarListaBaixadosUI();
+      }
     }
 
     // Resetar Aplicação e Limpar Dados do LocalStorage
