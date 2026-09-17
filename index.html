@@ -87,7 +87,6 @@
       word-break: break-all;
     }
 
-    /* Container de Carregamento e Spinner Principal */
     .loading-container {
       display: none;
       flex-direction: column;
@@ -105,7 +104,6 @@
       animation: spin 0.8s linear infinite;
     }
 
-    /* Mini Spinner para os botões */
     .mini-spinner {
       display: inline-block;
       width: 12px;
@@ -154,6 +152,17 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
+      transition: background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    /* Nova classe: pasta já visitada */
+    .file-card.folder-visited {
+      background: #e6f4ff;
+      border-color: #b3dbff;
+    }
+
+    .file-card.folder-visited .file-icon {
+      filter: hue-rotate(180deg);
     }
 
     .file-info {
@@ -220,7 +229,6 @@
       background-color: #006699;
     }
 
-    /* Seção de Arquivos Baixados */
     .downloads-section {
       margin-top: 30px;
       border-top: 2px dashed #ddd;
@@ -272,6 +280,58 @@
       align-items: center;
       gap: 8px;
     }
+
+    /* ===== Barra de Paginação (botão em pilha) ===== */
+    .pagination-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+      padding: 10px;
+      background: #f1f5f9;
+      border-radius: var(--border-radius);
+      border: 1px solid #e2e8f0;
+    }
+
+    .pagination-bar .page-btn {
+      background-color: #ffffff;
+      color: var(--primary-color);
+      border: 1px solid var(--primary-color);
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      min-width: 40px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .pagination-bar .page-btn:hover:not(:disabled) {
+      background-color: var(--primary-color);
+      color: #fff;
+    }
+
+    .pagination-bar .page-btn.active {
+      background-color: var(--primary-color);
+      color: #fff;
+      box-shadow: 0 2px 5px rgba(0,136,204,0.35);
+    }
+
+    .pagination-bar .page-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      background-color: #e9ecef;
+      color: #6c757d;
+      border-color: #ced4da;
+    }
+
+    .pagination-bar .page-info {
+      font-size: 0.8rem;
+      color: #555;
+      margin-left: 6px;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -285,15 +345,12 @@
         type="text" 
         id="folderInput" 
         placeholder="Cole o link completo ou o ID da pasta pública aqui"
-        value="https://drive.google.com/drive/folders/14rnhFYF-vZA7I8PtDbqPw2xEc2naGL2W"
       />
       <button onclick="buscarArquivos()">Listar Arquivos</button>
     </div>
 
-    <!-- Exibe o ID Limpo/Corrigido -->
     <div id="processedLinkBox" class="info-box" style="display: none;"></div>
 
-    <!-- Spinner e Barra de Progresso Principal -->
     <div id="loadingContainer" class="loading-container">
       <div class="spinner"></div>
       <div id="progressBarText" class="progress-bar-text">⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%</div>
@@ -302,7 +359,14 @@
     <div id="status" class="status"></div>
     <div id="results" class="results"></div>
 
-    <!-- Seção do Histórico de Baixados -->
+    <!-- Barra de Paginação -->
+    <div id="paginationBar" class="pagination-bar" style="display: none;">
+      <button class="page-btn" id="btnPrevPage" onclick="irParaPagina(paginaAtual - 1)">◀</button>
+      <span id="pageNumbers" style="display:flex; gap:6px;"></span>
+      <button class="page-btn" id="btnNextPage" onclick="irParaPagina(paginaAtual + 1)">▶</button>
+      <span class="page-info" id="pageInfo"></span>
+    </div>
+
     <div class="downloads-section">
       <div class="downloads-title">
         <div>
@@ -319,19 +383,49 @@
 
   <script>
     const API_KEY = "AIzaSyCnzf-Ji_bwbStZwAIAy9fxI6WiyfyFo9M";
+    const PAGE_SIZE = 50; // Tamanho de cada página da API
 
     let pastaAtualId = "";
-    
-    // Recupera dados salvos no localStorage (Persistência)
+
+    // ====== PERSISTÊNCIA ======
     let baixadosSet = new Set(JSON.parse(localStorage.getItem("drive_baixados_ids") || "[]"));
     let arquivosBaixados = JSON.parse(localStorage.getItem("drive_baixados_nomes") || "[]");
+    let pastasVisitadasSet = new Set(JSON.parse(localStorage.getItem("drive_pastas_visitadas") || "[]"));
 
-    // Inicialização ao carregar a página
+    // Paginação
+    let paginaAtual = 1;
+    let totalPaginas = 1;
+    let pageTokens = [null]; // índice 0 = token da página 1 (null); pageTokens[n] = token da página n+1
+    let nextPageTokenAtual = null;
+
+    // Inicialização
     window.addEventListener("DOMContentLoaded", () => {
+      // Restaura o link pesquisado
+      const linkSalvo = localStorage.getItem("drive_link_pesquisado") || "";
+      if (linkSalvo) {
+        document.getElementById("folderInput").value = linkSalvo;
+      }
+
       atualizarListaBaixadosUI();
+
+      // Se havia uma pasta carregada, já tenta carregar de novo
+      const pastaSalva = localStorage.getItem("drive_pasta_atual_id");
+      if (pastaSalva) {
+        pastaAtualId = pastaSalva;
+        // Carrega a página 1 automaticamente
+        carregarPagina(1, true);
+      }
     });
 
-    // Função para extrair e tratar o ID do Link
+    // ====== Persistência ======
+    function salvarEstado() {
+      localStorage.setItem("drive_baixados_ids", JSON.stringify(Array.from(baixadosSet)));
+      localStorage.setItem("drive_baixados_nomes", JSON.stringify(arquivosBaixados));
+      localStorage.setItem("drive_pastas_visitadas", JSON.stringify(Array.from(pastasVisitadasSet)));
+      localStorage.setItem("drive_link_pesquisado", document.getElementById("folderInput").value || "");
+      localStorage.setItem("drive_pasta_atual_id", pastaAtualId || "");
+    }
+
     function extrairECorrigirFolderId(input) {
       if (!input) return "";
       let textoLimpo = input.trim();
@@ -344,13 +438,6 @@
       return textoLimpo.split('?')[0].split('&')[0];
     }
 
-    // Salvar estado no localStorage
-    function salvarEstado() {
-      localStorage.setItem("drive_baixados_ids", JSON.stringify(Array.from(baixadosSet)));
-      localStorage.setItem("drive_baixados_nomes", JSON.stringify(arquivosBaixados));
-    }
-
-    // Atualizar UI do Histórico de Baixados
     function atualizarListaBaixadosUI() {
       const listElement = document.getElementById("downloadsList");
       const counterElement = document.getElementById("downloadCounter");
@@ -370,7 +457,7 @@
       });
     }
 
-    // Animação da Barra de Progresso Principal
+    // ====== Barra de Progresso ======
     function animarProgresso(callback) {
       const progressText = document.getElementById("progressBarText");
       const loadingContainer = document.getElementById("loadingContainer");
@@ -395,11 +482,10 @@
       }, 40);
     }
 
-    // Download usando a API de Mídia em segundo plano (Opção 2 - Sem redirecionar nem pedir e-mail)
+    // ====== DOWNLOAD (NÃO ALTERADO) ======
     async function iniciarDownload(btnElement, fileId, nomeArquivo) {
       if (baixadosSet.has(fileId)) return;
 
-      // Desabilita o botão e exibe o mini spinner
       btnElement.innerHTML = `<span class="mini-spinner"></span> Baixando...`;
       btnElement.classList.add("disabled");
 
@@ -414,7 +500,6 @@
         const blob = await response.blob();
         const blobUrl = window.URL.createObjectURL(blob);
 
-        // Dispara o download nativo do arquivo no navegador
         const a = document.createElement("a");
         a.href = blobUrl;
         a.download = nomeArquivo;
@@ -423,7 +508,6 @@
         document.body.removeChild(a);
         window.URL.revokeObjectURL(blobUrl);
 
-        // Registra e salva o arquivo como baixado
         baixadosSet.add(fileId);
         arquivosBaixados.push(nomeArquivo);
         salvarEstado();
@@ -434,7 +518,6 @@
       } catch (error) {
         console.warn("Download via API falhou ou ultrapassou cota, usando abertura no Drive:", error);
         
-        // Fallback: Abre a visualização direta no Drive caso o arquivo exija login/autenticação extra
         window.open(`https://drive.google.com/file/d/${fileId}/view`, '_blank');
         
         baixadosSet.add(fileId);
@@ -446,29 +529,87 @@
       }
     }
 
-    // Resetar Aplicação e Limpar Dados do LocalStorage
+    // ====== Reset ======
     function resetarAplicacao() {
-      if (confirm("Deseja realmente limpar todo o histórico de downloads salvos?")) {
+      if (confirm("Deseja realmente limpar TODO o histórico (downloads, pastas visitadas e link pesquisado)?")) {
         baixadosSet.clear();
         arquivosBaixados = [];
+        pastasVisitadasSet.clear();
+        pastaAtualId = "";
+        paginaAtual = 1;
+        totalPaginas = 1;
+        pageTokens = [null];
+
         localStorage.removeItem("drive_baixados_ids");
         localStorage.removeItem("drive_baixados_nomes");
-        pastaAtualId = "";
-        
+        localStorage.removeItem("drive_pastas_visitadas");
+        localStorage.removeItem("drive_link_pesquisado");
+        localStorage.removeItem("drive_pasta_atual_id");
+
+        document.getElementById("folderInput").value = "";
+        document.getElementById("results").innerHTML = "";
+        document.getElementById("status").innerText = "";
+        document.getElementById("processedLinkBox").style.display = "none";
+        document.getElementById("paginationBar").style.display = "none";
+
         atualizarListaBaixadosUI();
-        
-        // Re-renderiza a lista caso já haja arquivos exibidos na tela
-        if (document.getElementById("results").children.length > 0) {
-          buscarArquivos(true);
-        }
       }
     }
 
+    // ====== Navegação de Pastas ======
     function abrirPasta(subfolderId) {
+      // Marca a pasta como visitada
+      pastasVisitadasSet.add(subfolderId);
+      salvarEstado();
+
       document.getElementById("folderInput").value = subfolderId;
-      buscarArquivos();
+      pastaAtualId = subfolderId;
+      carregarPagina(1, false);
     }
 
+    // ====== Paginação ======
+    function renderizarPaginacao() {
+      const bar = document.getElementById("paginationBar");
+      const numbers = document.getElementById("pageNumbers");
+      const info = document.getElementById("pageInfo");
+      const btnPrev = document.getElementById("btnPrevPage");
+      const btnNext = document.getElementById("btnNextPage");
+
+      if (totalPaginas <= 1) {
+        bar.style.display = "none";
+        return;
+      }
+
+      bar.style.display = "flex";
+      numbers.innerHTML = "";
+
+      // Mostra no máximo 7 botões de página
+      let inicio = Math.max(1, paginaAtual - 3);
+      let fim = Math.min(totalPaginas, inicio + 6);
+      if (fim - inicio < 6) {
+        inicio = Math.max(1, fim - 6);
+      }
+
+      for (let p = inicio; p <= fim; p++) {
+        const btn = document.createElement("button");
+        btn.className = "page-btn" + (p === paginaAtual ? " active" : "");
+        btn.innerText = p;
+        btn.onclick = () => irParaPagina(p);
+        numbers.appendChild(btn);
+      }
+
+      btnPrev.disabled = paginaAtual <= 1;
+      btnNext.disabled = paginaAtual >= totalPaginas;
+
+      info.innerText = `Página ${paginaAtual} de ${totalPaginas}`;
+    }
+
+    function irParaPagina(p) {
+      if (p < 1 || p > totalPaginas || p === paginaAtual) return;
+      carregarPagina(p, false);
+    }
+
+    // ====== Buscar Arquivos (com paginação) ======
     async function buscarArquivos(forcarRecarregamento = false) {
       const inputVal = document.getElementById("folderInput").value;
       const statusDiv = document.getElementById("status");
@@ -485,16 +626,45 @@
       processedBox.style.display = "block";
       processedBox.innerHTML = `⚙️ <b>Link Processado com Sucesso!</b><br>ID extraído da pasta: <code>${folderId}</code>`;
 
-      if (folderId === pastaAtualId && !forcarRecarregamento) {
-        statusDiv.innerText = "⚠️ Esta pasta já está carregada e sendo exibida na tela.";
+      // Se for a mesma pasta e não for forçar, apenas avisa
+      if (folderId === pastaAtualId && !forcarRecarregamento && paginaAtual > 1) {
+        statusDiv.innerText = "⚠️ Esta pasta já está carregada. Use a paginação abaixo.";
         return;
       }
 
+      pastaAtualId = folderId;
+      paginaAtual = 1;
+      pageTokens = [null];
+      totalPaginas = 1;
+
+      // Salva persistência
+      salvarEstado();
+
+      // Esconde barra antes de recarregar
+      document.getElementById("paginationBar").style.display = "none";
+
+      carregarPagina(1, false);
+    }
+
+    async function carregarPagina(numeroPagina, modoRestauracao) {
+      const statusDiv = document.getElementById("status");
+      const resultsDiv = document.getElementById("results");
+      const folderId = pastaAtualId;
+
+      if (!folderId) return;
+
       statusDiv.innerText = "Consultando Google Drive API...";
       resultsDiv.innerHTML = "";
+      document.getElementById("paginationBar").style.display = "none";
 
       animarProgresso(async () => {
-        const url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=files(id,name,mimeType)&key=${API_KEY}`;
+        // Descobre o token da página
+        let pageToken = pageTokens[numeroPagina - 1] || null;
+
+        let url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=nextPageToken,files(id,name,mimeType)&pageSize=${PAGE_SIZE}&key=${API_KEY}`;
+        if (pageToken) {
+          url += `&pageToken=${encodeURIComponent(pageToken)}`;
+        }
 
         try {
           const response = await fetch(url);
@@ -510,8 +680,18 @@
             return;
           }
 
-          pastaAtualId = folderId;
-          statusDiv.innerText = `Sucesso! ${data.files.length} arquivo(s) encontrado(s).`;
+          paginaAtual = numeroPagina;
+          nextPageTokenAtual = data.nextPageToken || null;
+
+          // Guarda o token da próxima página se existir
+          if (nextPageTokenAtual) {
+            pageTokens[numeroPagina] = nextPageTokenAtual;
+            totalPaginas = Math.max(totalPaginas, numeroPagina + 1);
+          } else {
+            totalPaginas = numeroPagina;
+          }
+
+          statusDiv.innerText = `Sucesso! ${data.files.length} arquivo(s) encontrado(s) nesta página.`;
 
           data.files.forEach(file => {
             const isPdf = file.mimeType === "application/pdf";
@@ -520,8 +700,13 @@
             const card = document.createElement("div");
             card.className = "file-card";
 
+            // Nova funcionalidade: marca pasta como visitada
+            if (isFolder && pastasVisitadasSet.has(file.id)) {
+              card.classList.add("folder-visited");
+            }
+
             let icon = "📄";
-            if (isFolder) icon = "📁";
+            if (isFolder) icon = pastasVisitadasSet.has(file.id) ? "📂" : "📁";
             else if (isPdf) icon = "📕";
 
             const jaBaixado = baixadosSet.has(file.id);
@@ -545,6 +730,8 @@
 
             resultsDiv.appendChild(card);
           });
+
+          renderizarPaginacao();
 
         } catch (err) {
           console.error(err);
